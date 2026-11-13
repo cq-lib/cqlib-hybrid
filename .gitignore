@@ -9,10 +9,13 @@ build/
 dist/
 *.egg-info/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .coverage
 htmlcov/
 
 # Local files
 .env
 .env.*
+.pypirc
 .DS_Store
