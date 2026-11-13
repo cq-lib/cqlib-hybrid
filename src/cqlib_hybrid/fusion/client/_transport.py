@@ -137,10 +137,11 @@ class Transport:
                     "account_type": "member",
                 },
                 timeout=timeout,
+                allow_redirects=False,
             )
         except requests.RequestException as exc:
             raise _transport_error(exc) from exc
-        if response.status_code >= 400:
+        if not 200 <= response.status_code < 300:
             raise fail(
                 "transport",
                 f"login failed with HTTP {response.status_code}",
@@ -215,6 +216,7 @@ class Transport:
                 "params": query or None,
                 "timeout": left,
                 "stream": stream,
+                "allow_redirects": False,
             }
             handle = None
             try:

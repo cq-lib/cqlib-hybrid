@@ -10,6 +10,7 @@ import sys
 import textwrap
 import time
 from pathlib import Path
+from tempfile import mkdtemp
 from typing import TYPE_CHECKING, Any
 
 from cqlib_hybrid.fusion.runtime.classic.local import ClassicJobResult
@@ -33,7 +34,7 @@ class SlurmClassicRunner:
         poll_interval: float = 1.0,
         python_executable: str | None = None,
     ):
-        self.workdir = workdir / "slurm"
+        self.workdir = workdir.resolve() / "slurm"
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.partition = partition
         self.dry_run = dry_run
@@ -45,8 +46,7 @@ class SlurmClassicRunner:
 
     def run(self, stage_name: str, payload: dict[str, Any]) -> ClassicJobResult:
         self._counter += 1
-        job_dir = self.workdir / f"job-{self._counter:04d}"
-        job_dir.mkdir(parents=True, exist_ok=True)
+        job_dir = Path(mkdtemp(dir=self.workdir, prefix=f"job-{self._counter:04d}-"))
 
         input_path = job_dir / "input.json"
         output_path = job_dir / "output.json"
@@ -71,7 +71,10 @@ class SlurmClassicRunner:
                     "input_keys": sorted(payload.keys()),
                     "hostname": __import__("socket").gethostname(),
                 }}
-                Path({json.dumps(str(output_path))}).write_text(json.dumps(result))
+                target = Path({json.dumps(str(output_path))})
+                temporary = target.with_suffix(".tmp")
+                temporary.write_text(json.dumps(result))
+                temporary.replace(target)
                 PY
                 """
             ),
@@ -107,8 +110,7 @@ class SlurmClassicRunner:
     ) -> tuple[Context, ClassicJobResult]:
         """Execute the user stage in the Slurm job instead of the orchestrator."""
         self._counter += 1
-        job_dir = self.workdir / f"job-{self._counter:04d}"
-        job_dir.mkdir(parents=True, exist_ok=True)
+        job_dir = Path(mkdtemp(dir=self.workdir, prefix=f"job-{self._counter:04d}-"))
         input_path = job_dir / "context.json"
         output_path = job_dir / "output.json"
         script_path = job_dir / "run.sh"
@@ -142,9 +144,12 @@ class SlurmClassicRunner:
                 )
                 ctx = Context.from_dict(json.loads(Path({json.dumps(str(input_path))}).read_text()))
                 next_ctx, payload = workflow.run_stage(spec, ctx)
-                Path({json.dumps(str(output_path))}).write_text(
+                target = Path({json.dumps(str(output_path))})
+                temporary = target.with_suffix(".tmp")
+                temporary.write_text(
                     json.dumps({{"context": next_ctx.to_dict(), "payload": payload}}, ensure_ascii=False)
                 )
+                temporary.replace(target)
                 PY
                 """
             ),
@@ -196,8 +201,16 @@ class SlurmClassicRunner:
         )
         job_id = _parse_job_id(completed.stdout) or f"S-{self._counter:04d}"
         deadline = time.monotonic() + self.wait_timeout
-        while not output_path.is_file():
-            if job_id.isdigit() and not _slurm_job_active(job_id):
+        while True:
+            state = _slurm_job_state(job_id) if job_id.isdigit() else None
+            if state in {
+                "FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL",
+                "PREEMPTED", "BOOT_FAIL", "DEADLINE", "REVOKED",
+            }:
+                raise RuntimeError(f"Slurm job {job_id} ended with state {state}")
+            if output_path.is_file() and state in (None, "COMPLETED"):
+                break
+            if not output_path.is_file() and job_id.isdigit() and not _slurm_job_active(job_id):
                 detail = _read_text(slurm_path.with_name("slurm.err"))
                 raise RuntimeError(
                     f"Slurm job {job_id} ended without output"
@@ -209,6 +222,18 @@ class SlurmClassicRunner:
                 )
             time.sleep(self.poll_interval)
         return job_id
+
+
+def _slurm_job_state(job_id: str) -> str | None:
+    if not _command_exists("sacct"):
+        return None
+    result = subprocess.run(
+        ["sacct", "-n", "-X", "-j", job_id, "--format=State", "--parsable2"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    return result.stdout.strip().splitlines()[0].split("|")[0].split()[0].rstrip("+")
 
 
 def _slurm_job_active(job_id: str) -> bool:

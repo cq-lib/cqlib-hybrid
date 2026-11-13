@@ -1,9 +1,8 @@
 """Run two QCIS rounds inside a QRMI-managed container.
 
-The execution image needs cqlib-hybrid. The default connection URL is
-ws://223.244.15.5:30002/qrmi/internal/workflow/cpu-executions; a non-empty
-QRMI_HYBRID_CPU_CONNECTION_URL environment variable overrides it. QRMI must
-still supply QRMI_HYBRID_CPU_TICKET and QRMI_HYBRID_CPU_HEARTBEAT_SECONDS.
+The execution image needs cqlib-hybrid. The platform must supply
+QRMI_HYBRID_CPU_CONNECTION_URL, QRMI_HYBRID_CPU_TICKET and
+QRMI_HYBRID_CPU_HEARTBEAT_SECONDS. Use wss:// outside a protected network.
 No cqlib dependency or argument/result files are required.
 """
 

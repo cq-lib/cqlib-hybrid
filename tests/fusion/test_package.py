@@ -167,6 +167,6 @@ def test_checkpoint_resume_does_not_repeat_completed_stage(tmp_path):
             quantum_runner=FailingQuantumRunner(),
         ).run()
 
-    result = Orchestrator(load_workflow_from_dir(SAMPLE), manifest, workdir).run()
+    result = Orchestrator(load_workflow_from_dir(SAMPLE), manifest, workdir, resume=True).run()
     assert result.context.classic_iterations == 3
     assert result.context.quantum_iterations == 3

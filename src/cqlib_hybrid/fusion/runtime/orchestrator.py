@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import hashlib
+import inspect
+import json
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
 from cqlib_hybrid.fusion.checkpoint.store import CheckpointStore
 from cqlib_hybrid.fusion.events.model import EventEmitter, FusionEvent
 from cqlib_hybrid.fusion.exceptions import WorkflowError
+from cqlib_hybrid.fusion.package.files import task_files
 from cqlib_hybrid.fusion.runtime.classic.local import LocalClassicRunner
 from cqlib_hybrid.fusion.runtime.quantum.mock import MockQuantumRunner
 from cqlib_hybrid.fusion.spec.manifest import FusionManifest
@@ -37,7 +41,9 @@ class Orchestrator:
         *,
         classic_runner: LocalClassicRunner | None = None,
         quantum_runner: MockQuantumRunner | Any | None = None,
+        resume: bool = False,
     ):
+        self.resume = resume
         self.workflow = workflow
         self.manifest = manifest
         self.workdir = workdir
@@ -53,6 +59,16 @@ class Orchestrator:
         saved = (
             self.checkpoint.load_state() if self.manifest.runtime.checkpoint else None
         )
+        self._fingerprint = self._workflow_fingerprint()
+        if saved:
+            if not self.resume:
+                raise WorkflowError(
+                    "checkpoint exists; use resume=True (CLI: --resume) or a new workdir"
+                )
+            if saved.get("fingerprint") != self._fingerprint:
+                raise WorkflowError("checkpoint does not match this workflow and manifest")
+        elif self.resume:
+            raise WorkflowError("no checkpoint available to resume")
         if saved and "context" in saved:
             ctx = Context.from_dict(saved["context"])
             saved_last_kind = saved.get("last_kind")
@@ -239,12 +255,40 @@ class Orchestrator:
             subtasks=list(self.subtasks),
         )
 
+    def _workflow_fingerprint(self) -> str:
+        digest = hashlib.sha256()
+        digest.update(json.dumps(asdict(self.manifest), sort_keys=True).encode())
+        cls = type(self.workflow)
+        digest.update(f"{cls.__module__}:{cls.__qualname__}".encode())
+        try:
+            digest.update(inspect.getsource(cls).encode())
+        except (OSError, TypeError):
+            # Dynamic workflows without inspectable source cannot safely resume.
+            if self.resume:
+                raise WorkflowError("cannot fingerprint dynamic workflow for resume") from None
+        root = getattr(self.workflow, "_fusion_root", None)
+        if root is not None:
+            root = Path(root)
+            workdir = self.workdir.resolve()
+            for path in task_files(root):
+                # Runtime output must not change the identity of the task.
+                if workdir == path.resolve() or workdir in path.resolve().parents:
+                    continue
+                digest.update(path.relative_to(root).as_posix().encode())
+                digest.update(b"\0")
+                with path.open("rb") as handle:
+                    for chunk in iter(lambda: handle.read(65536), b""):
+                        digest.update(chunk)
+                digest.update(b"\0")
+        return digest.hexdigest()
+
     def _save_checkpoint(self, ctx: Context, last_kind: StageKind | None) -> None:
         if not self.manifest.runtime.checkpoint:
             return
         self.checkpoint.save_state(
             {
-                "version": 1,
+                "version": 2,
+                "fingerprint": self._fingerprint,
                 "context": ctx.to_dict(),
                 "last_kind": last_kind,
                 "stage_index": dict(self._stage_index),

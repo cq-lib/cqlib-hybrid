@@ -81,8 +81,6 @@ class QRMIClient:
     errors stop immediately. A closed client cannot be reopened.
     """
 
-    DEFAULT_CONNECTION_URL = "ws://172.18.48.14:9901/internal/workflow/cpu-executions"
-
     def __init__(
         self,
         url: str,
@@ -137,8 +135,10 @@ class QRMIClient:
 
     @classmethod
     def from_env(cls, **kwargs: Any) -> "QRMIClient":
-        """Read injected credentials and heartbeat, with an optional URL override."""
-        url = os.environ.get("QRMI_HYBRID_CPU_CONNECTION_URL") or cls.DEFAULT_CONNECTION_URL
+        """Read injected credentials and heartbeat, including the deployment URL."""
+        url = os.environ.get("QRMI_HYBRID_CPU_CONNECTION_URL")
+        if not url:
+            raise HybridRuntimeError("QRMI_HYBRID_CPU_CONNECTION_URL environment variable is missing or empty")
         names = (
             "QRMI_HYBRID_CPU_TICKET",
             "QRMI_HYBRID_CPU_HEARTBEAT_SECONDS",

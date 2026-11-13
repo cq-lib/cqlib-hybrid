@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -14,14 +15,14 @@ from cqlib_hybrid.fusion import __version__
 from cqlib_hybrid.fusion.client.models import ResourcePlan
 from cqlib_hybrid.fusion.exceptions import CqfusionError, CqfusionRequestError
 from cqlib_hybrid.fusion.package.builder import build_package
-from cqlib_hybrid.fusion.package.loader import load_workflow_from_dir
+from cqlib_hybrid.fusion.package.loader import _safe_extract, load_workflow_from_dir
 from cqlib_hybrid.fusion.package.validator import validate_package_dir
 from cqlib_hybrid.fusion.runtime.factory import (
     create_classic_runner,
     create_quantum_runner,
 )
-from cqlib_hybrid.fusion.runtime.recommend import recommend_local
 from cqlib_hybrid.fusion.runtime.orchestrator import Orchestrator
+from cqlib_hybrid.fusion.runtime.recommend import recommend_local
 from cqlib_hybrid.fusion.spec.manifest import load_manifest
 from cqlib_hybrid.fusion.spec.profile import extract_profile
 
@@ -39,8 +40,12 @@ def _resolve_task_dir(path: Path) -> tuple[Path, Path | None]:
         tmp = Path(tempfile.mkdtemp(prefix="cqlib-hybrid-task-"))
         import zipfile
 
-        with zipfile.ZipFile(root) as archive:
-            archive.extractall(tmp)
+        try:
+            with zipfile.ZipFile(root) as archive:
+                _safe_extract(archive, tmp)
+        except BaseException:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise
         return tmp, root
     return root, None
 
@@ -119,7 +124,17 @@ def _cmd_build(args: argparse.Namespace) -> int:
 
 
 def _cmd_run_local(args: argparse.Namespace) -> int:
-    root, _ = _resolve_task_dir(args.path)
+    root, archive = _resolve_task_dir(args.path)
+    try:
+        return _run_local(args, root)
+    finally:
+        if archive is not None:
+            shutil.rmtree(root, ignore_errors=True)
+
+
+def _run_local(args: argparse.Namespace, root: Path) -> int:
+    if args.resume and args.workdir is None:
+        raise CqfusionError("--resume requires --workdir")
     manifest = load_manifest(root / "fusion.yaml")
     workflow = load_workflow_from_dir(root)
     profile = extract_profile(manifest, workflow)
@@ -149,6 +164,7 @@ def _cmd_run_local(args: argparse.Namespace) -> int:
         workdir,
         classic_runner=classic_runner,
         quantum_runner=quantum_runner,
+        resume=args.resume,
     ).run()
     _print_json(
         {
@@ -371,6 +387,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="run directory; a private temporary directory when omitted",
     )
+    run_local.add_argument("--resume", action="store_true", help="resume a matching checkpoint in --workdir")
     run_local.add_argument("--classic", choices=["local", "slurm"], default="local")
     run_local.add_argument("--quantum", choices=["mock", "tianyan", "qrmi"], default="mock")
     run_local.add_argument(

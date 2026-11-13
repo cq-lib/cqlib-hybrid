@@ -38,13 +38,13 @@ python3 -m pip install ".[fusion,quantum]"  # 另需在天衍真机上运行量�
 
 ## QRMI 容器长连接
 
-`QRMIClient` 用于已经由 QRMI 平台启动的容器。`QRMIClient.from_env()` 默认连接 `ws://223.244.15.5:30002/qrmi/internal/workflow/cpu-executions`；设置非空的 `QRMI_HYBRID_CPU_CONNECTION_URL` 可优先覆盖默认地址。平台仍需注入当前作业票据和心跳间隔：
+`QRMIClient` 用于已经由 QRMI 平台启动的容器。平台必须注入 `QRMI_HYBRID_CPU_CONNECTION_URL`、当前作业票据和心跳间隔；SDK 不内置部署地址。公开服务应使用 `wss://` 加密连接；显式配置的 `ws://` 仅适用于已由部署方保护的网络，它会明文传输票据和业务数据。
 
 容器 SDK 使用原生 WebSocket 和 `Authorization` 作业票据认证，默认不发送浏览器 `Origin` 请求头，以保持命令行客户端调用一致。
 
 | 环境变量 | 用途 |
 | --- | --- |
-| `QRMI_HYBRID_CPU_CONNECTION_URL` | 可选，完整 `ws://` 或 `wss://` 地址；未设置或为空时使用上述默认地址 |
+| `QRMI_HYBRID_CPU_CONNECTION_URL` | 必填，完整 `wss://` 地址（受保护网络可显式使用 `ws://`） |
 | `QRMI_HYBRID_CPU_TICKET` | 必填，当前作业票据，用于 WebSocket 握手的 `Authorization: Bearer ...` |
 | `QRMI_HYBRID_CPU_HEARTBEAT_SECONDS` | 必填，正整数心跳间隔，单位秒 |
 
@@ -63,7 +63,7 @@ with QRMIClient.from_env() as client:
 
 ## 量子调用
 
-`run_quantum()` 自动按从 1 开始的连续轮次提交 QCIS 线路，等待 `QPU_RESULT` 后返回原始 `result` 值；结果可以是任意合法 JSON 值，包括对象、数组、字符串、数字、布尔值或 `None`，不进行 Base64 解码。上一轮成功后才能开始下一轮。失败或取消状态会抛出 `QRMIQuantumError`，可读取其 `iteration_no`、`task_status` 和 `result` 属性。可选参数 `topology_mapping_enabled=True/False` 控制拓扑映射；省略时由平台决定。
+`run_quantum()` 自动按从 1 开始的连续轮次提交 QCIS 线路，等待 `QPU_RESULT` 后返回 `result` 值；结果可以是任意合法 JSON 值，包括对象、数组、字符串、数字、布尔值或 `None`，一般保持原值；当成功结果包含字符串 `experimentResults`，并带有 `waveforms` 或 `measureQubitList` 时，SDK 会解码 Base64 测量数据，添加 `counts` 和 `shots`，同时保留原字段。上一轮成功后才能开始下一轮。失败或取消状态会抛出 `QRMIQuantumError`，可读取其 `iteration_no`、`task_status` 和 `result` 属性。可选参数 `topology_mapping_enabled=True/False` 控制拓扑映射；省略时由平台决定。
 
 需要分别提交和等待时，可以使用以下接口；`wait_quantum_result()` 返回完整推送消息，失败、取消也作为消息返回：
 
@@ -165,6 +165,10 @@ cqlib-hybrid download TASK_ID ./results
 环境变量：`TIANYAN_API_KEY`（也识别 `CQFUSION_LOGIN_KEY`、`LOGIN_KEY`）、`CQLIB_HYBRID_HOST`（默认 `https://qc.zdxlz.com`）、`CQLIB_HYBRID_TOKEN`。客户端不会打印密钥或令牌。只运行你信任的任务包，本地运行会执行包里的 Python。
 
 提交到云端的 ZIP 根目录必须有 `tianyan.env`，并且定义 `TIANYAN_APP_SHOTS`、`TIANYAN_APP_ITERATIONS`、`TIANYAN_APP_WAIT_TIMEOUT`，否则平台会拒绝上传。`get_job()` 只返回任务的基础信息，不含运行状态和迭代数；状态用 `progress()` 或 `wait_job()`。
+
+本地运行默认使用独立临时工作目录。需要保留断点时，请指定 `--workdir ./run-demo`；失败后使用相同任务和 `--workdir ./run-demo --resume` 显式恢复。Python API 对应 `Orchestrator(..., resume=True)`。恢复会校验工作流、任务文件和 manifest；旧版断点或不匹配的任务会被拒绝，应使用新的工作目录。工作目录中的日志和断点由调用方管理；ZIP 解包目录在本地运行退出后自动清理。
+
+任务构建和静态校验共用文件筛选规则，跳过虚拟环境、缓存、构建目录、符号链接及常见凭据文件（例如 `.env.*`、`*.pem`、`*.key`）。构建结果还会执行上传格式校验：根目录恰好一个 `main.py`，整个包恰好一个 `.qcis`。上传前应检查 ZIP 内容，自定义文件名中的凭据仍需自行移除。HTTP 登录、上传和下载均不跟随重定向；请配置最终服务地址。
 
 ### Python API
 

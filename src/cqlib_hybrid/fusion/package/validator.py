@@ -6,6 +6,7 @@ import ast
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from cqlib_hybrid.fusion.package.files import task_files
 from cqlib_hybrid.fusion.spec.manifest import load_manifest
 from cqlib_hybrid.fusion.spec.profile import extract_profile
 
@@ -57,8 +58,8 @@ def validate_package_dir(source_dir: Path | str) -> ValidationReport:
                     f"entrypoint callable {callable_name!r} is not defined in {entry_file.name}"
                 )
             python_trees = [tree]
-            for source in root.rglob("*.py"):
-                if source == entry_file or source.is_symlink():
+            for source in task_files(root):
+                if source == entry_file or source.suffix != ".py":
                     continue
                 python_trees.append(
                     ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
