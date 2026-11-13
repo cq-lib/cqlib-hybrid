@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cqlib-hybrid"
+version = "0.3.0"
+description = "Classical-quantum hybrid SDK: QRMI container client and fusion task tooling for the Tianyan cloud"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+authors = [
+    { name = "China Telecom Quantum Group" },
+]
+keywords = ["quantum", "hybrid", "fusion", "cqlib", "tianyan", "qrmi"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Typing :: Typed",
+]
+dependencies = ["websocket-client>=1.6,<2"]
+
+[project.optional-dependencies]
+# Task packaging, local runs and the fusion cloud client.
+fusion = ["pyyaml>=6.0", "requests>=2.28"]
+# Run quantum stages on Tianyan from a local workflow. cqlib-tianyan requires Python >= 3.10.
+quantum = ["cqlib-tianyan[cqlib]"]
+dev = ["pytest>=7.0", "pyyaml>=6.0", "requests>=2.28"]
+
+[project.urls]
+Homepage = "https://github.com/cq-lib/cqlib-hybrid"
+Repository = "https://github.com/cq-lib/cqlib-hybrid"
+Issues = "https://github.com/cq-lib/cqlib-hybrid/issues"
+
+[project.scripts]
+cqlib-hybrid = "cqlib_hybrid.fusion.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+cqlib_hybrid = ["py.typed"]
+
+[tool.setuptools]
+license-files = ["LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
